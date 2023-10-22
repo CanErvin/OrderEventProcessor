@@ -1,0 +1,89 @@
+using System;
+using System.Text;
+using System.Text.Json;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
+
+public class OrderEvent
+{
+    public string Id { get; set; }
+    public string Product { get; set; }
+    public decimal Total { get; set; }
+    public string Currency { get; set; }
+}
+
+public class PaymentEvent
+{
+    public string OrderId { get; set; }
+    public decimal Amount { get; set; }
+}
+
+class Program
+{
+    static void Main()
+    {
+        var factory = new ConnectionFactory() { HostName = "localhost" }; // Update with your RabbitMQ server details
+
+        using var connection = factory.CreateConnection();
+        using var channel = connection.CreateModel();
+
+        // Declare the exchange for message type routing
+        channel.ExchangeDeclare("events", ExchangeType.Direct);
+
+        // Declare the queues
+        channel.QueueDeclare("OrderEventQueue", false, false, false, null);
+        channel.QueueDeclare("PaymentEventQueue", false, false, false, null);
+
+        // Bind the queues to the exchange based on the message type
+        channel.QueueBind("OrderEventQueue", "events", "OrderEvent");
+        channel.QueueBind("PaymentEventQueue", "events", "PaymentEvent");
+
+        var orderEventConsumer = new EventingBasicConsumer(channel);
+        orderEventConsumer.Received += (model, ea) =>
+        {
+            var body = ea.Body.ToArray();
+            var message = Encoding.UTF8.GetString(body);
+            var orderEvent = JsonSerializer.Deserialize<OrderEvent>(message);
+
+            // Simulate order record creation in PostgreSQL
+            CreateOrderRecord(orderEvent);
+
+            Console.WriteLine($"Order: {orderEvent.Id}, Product: {orderEvent.Product}, Total: {orderEvent.Total} {orderEvent.Currency}");
+        };
+
+        var paymentEventConsumer = new EventingBasicConsumer(channel);
+        paymentEventConsumer.Received += (model, ea) =>
+        {
+            var body = ea.Body.ToArray();
+            var message = Encoding.UTF8.GetString(body);
+            var paymentEvent = JsonSerializer.Deserialize<PaymentEvent>(message);
+
+            // Check if the related order is fully paid
+            CheckOrderPaymentStatus(paymentEvent);
+
+            Console.WriteLine($"Order: {paymentEvent.OrderId}, Amount Paid: {paymentEvent.Amount} USD, Status: PAID");
+        };
+
+        // Consume messages
+        channel.BasicConsume("OrderEventQueue", true, orderEventConsumer);
+        channel.BasicConsume("PaymentEventQueue", true, paymentEventConsumer);
+
+        Console.WriteLine("Press [Enter] to exit.");
+        Console.ReadLine();
+    }
+
+    // Simulate order record creation in PostgreSQL
+    private static void CreateOrderRecord(OrderEvent orderEvent)
+    {
+        // Implement PostgreSQL database logic here
+        // For simplicity, we'll print the order creation details
+        Console.WriteLine($"Creating order record: {orderEvent.Id}");
+    }
+
+    // Check order payment status
+    private static void CheckOrderPaymentStatus(PaymentEvent paymentEvent)
+    {
+        // Implement logic to check if the order is fully paid
+        // For simplicity, we'll assume that every payment is valid
+    }
+}
